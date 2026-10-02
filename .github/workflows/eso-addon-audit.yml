@@ -1,0 +1,16 @@
+name: ESO Addon Audit
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  eso-addon-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: ./.github/actions/eso-addon-audit

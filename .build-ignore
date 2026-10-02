@@ -1,0 +1,16 @@
+.git
+.github
+.luacheckrc
+.eso-auditrc
+.build-ignore
+README_ESOUI.txt
+README_BETHESDA.txt
+CHANGELOG_ESOUI.txt
+CHANGELOG_GITHUB.txt
+CHANGELOG_BETHESDA.txt
+README_BBCODE.txt
+README_COMMONMARK.txt
+CHANGELOG_BBCODE.txt
+CHANGELOG_GFM.txt
+CHANGELOG_COMMONMARK.txt
+APH-CodeRunner-Test-Checklist.xlsx

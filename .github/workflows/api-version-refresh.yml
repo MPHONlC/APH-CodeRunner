@@ -1,0 +1,42 @@
+name: API Version Refresh
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      result:
+        value: ${{ jobs.refresh-api-version.outputs.result }}
+      old_api:
+        value: ${{ jobs.refresh-api-version.outputs.old_api }}
+      new_api:
+        value: ${{ jobs.refresh-api-version.outputs.new_api }}
+
+jobs:
+  refresh-api-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      result: ${{ steps.refresh.outputs.result }}
+      old_api: ${{ steps.refresh.outputs.old_api }}
+      new_api: ${{ steps.refresh.outputs.new_api }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: ./.github/actions/git-commit-signing
+        with:
+          ssh_signing_key: ${{ secrets.SSH_SIGNING_KEY }}
+
+      - id: refresh
+        uses: ./.github/actions/eso-api-version-refresh
+        with:
+          manifest_file: 'APH-CodeRunner.txt'
+          git_name: 'MPHONlC'
+          git_email: '207844175+MPHONlC@users.noreply.github.com'

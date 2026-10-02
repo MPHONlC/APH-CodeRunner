@@ -1,0 +1,72 @@
+name: Release Gate
+
+on:
+  workflow_call:
+
+jobs:
+  lua-check:
+    uses: ./.github/workflows/lua-check.yml
+
+  api-version-refresh:
+    needs: lua-check
+    uses: ./.github/workflows/api-version-refresh.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  version-refresh:
+    needs: api-version-refresh
+    uses: ./.github/workflows/version-refresh.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  readme-badge-check:
+    needs: version-refresh
+    uses: ./.github/workflows/readme-badge-check.yml
+    with:
+      fix: true
+    secrets: inherit
+    permissions:
+      contents: write
+
+  dependency-check:
+    needs: readme-badge-check
+    uses: ./.github/workflows/dependency-check.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  localization-check:
+    needs: dependency-check
+    uses: ./.github/workflows/localization-check.yml
+
+  broken-link-check:
+    needs: localization-check
+    uses: ./.github/workflows/broken-link-check.yml
+    with:
+      fix: true
+    secrets: inherit
+    permissions:
+      contents: write
+
+  slash-command-doc-check:
+    needs: broken-link-check
+    uses: ./.github/workflows/slash-command-doc-check.yml
+
+  description-check:
+    needs: slash-command-doc-check
+    uses: ./.github/workflows/description-check.yml
+
+  markdown-check:
+    needs: description-check
+    uses: ./.github/workflows/markdown-check.yml
+    with:
+      apply_fix: true
+    secrets: inherit
+    permissions:
+      contents: write
+
+  changelog-check:
+    needs: markdown-check
+    uses: ./.github/workflows/changelog-check.yml

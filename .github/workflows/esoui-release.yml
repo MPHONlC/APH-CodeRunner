@@ -1,0 +1,185 @@
+name: ESOUI Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry Run (tests the ESOUI upload against ESOUI's test endpoint, publishes nothing)"
+        type: boolean
+        default: true
+      upload_esoui:
+        description: "Upload to ESOUI"
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      dry_run:
+        description: "Dry Run (tests the ESOUI upload against ESOUI's test endpoint, publishes nothing)"
+        type: boolean
+        default: true
+      upload_esoui:
+        description: "Upload to ESOUI"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    uses: ./.github/workflows/release-gate.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  release:
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Decide what this run does
+        id: mode
+        run: |
+          if [ "${{ inputs.dry_run }}" == "true" ]; then
+            echo "mode=dry" >> "$GITHUB_OUTPUT"
+            if [ "${{ inputs.upload_esoui }}" == "true" ]; then
+              echo "::notice title=Dry Run Is On::Upload to ESOUI was checked, but Dry Run is on, so nothing is published."
+            fi
+          elif [ "${{ inputs.upload_esoui }}" == "true" ]; then
+            echo "mode=real" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Nothing To Do::Dry Run is off and Upload to ESOUI is not checked."
+          fi
+
+      - name: Read version from manifest
+        id: version
+        run: |
+          VER=$(grep "^## AddOnVersion:" APH-CodeRunner.txt | awk '{print $3}')
+          DISPLAY_VER=$(grep "^## Version:" APH-CodeRunner.txt | awk '{print $3}')
+          API_VER=$(grep "^## APIVersion:" APH-CodeRunner.txt | awk '{print $3, $4}')
+          echo "Read version: $DISPLAY_VER (AddOnVersion $VER, API: $API_VER)"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "display_version=$DISPLAY_VER" >> "$GITHUB_OUTPUT"
+          echo "api_version=$API_VER" >> "$GITHUB_OUTPUT"
+
+      - name: Build addon zip (excludes anything in .build-ignore)
+        run: |
+          mkdir -p /tmp/build/APH-CodeRunner
+          rsync -a --exclude-from=.build-ignore ./ /tmp/build/APH-CodeRunner/
+          cd /tmp/build && zip -r APH-CodeRunner.zip APH-CodeRunner
+          echo "zip_file=/tmp/build/APH-CodeRunner.zip" >> "$GITHUB_ENV"
+
+      - name: Extract latest changelog entries
+        run: |
+          awk '/^\[b\]\[COLOR="Orange"\]Version / { if (found) exit; found=1 } found' CHANGELOG_BBCODE.txt > latest_changes_esoui.txt
+          awk '/^### Version / { if (found) exit; found=1 } found' CHANGELOG_GFM.txt > latest_changes_github.md
+          awk '/^# VERSION / { if (found) exit; found=1 } found' CHANGELOG_COMMONMARK.txt > latest_changes_bethesda.txt
+          awk '/^Version: / { if (found) exit; found=1 } found' CHANGELOG.md > latest_changes_plain.md
+          cat latest_changes_plain.md
+
+      - name: Test upload to ESOUI (dry run)
+        id: dry_run_step
+        if: steps.mode.outputs.mode == 'dry'
+        uses: m00nyONE/esoui-upload@main
+        with:
+          api_key: ${{ secrets.ESOUI_API_KEY }}
+          addon_id: ''
+          version: ${{ steps.version.outputs.display_version }}
+          zip_file: ${{ env.zip_file }}
+          changelog_file: 'CHANGELOG_BBCODE.txt'
+          description_file: 'README_BBCODE.txt'
+          test: true
+
+      - name: Annotate dry_run_step result
+        if: always() && steps.mode.outputs.mode == 'dry'
+        run: |
+          STATUS="${{ steps.dry_run_step.outcome }}"
+          if [ "$STATUS" == "success" ]; then
+            TITLE="ESOUI Dry Run Complete"
+            DETAIL=""
+          else
+            TITLE="ESOUI Dry Run Failed"
+            DETAIL=" Check the 'Test upload to ESOUI (dry run)' step's log above. An input problem shows its own annotation there; a rejection from ESOUI's server won't show a response body (the upload action's curl call discards it), so a failure with no other detail usually means the API key, addon ID, or version was rejected server-side."
+          fi
+          echo "::notice title=$TITLE::Version ${{ steps.version.outputs.display_version }} (AddOnVersion ${{ steps.version.outputs.version }}), declared API ${{ steps.version.outputs.api_version }}.$DETAIL"
+          {
+            echo "## $TITLE"
+            echo ""
+            echo "- **Version:** ${{ steps.version.outputs.display_version }} (AddOnVersion \`${{ steps.version.outputs.version }}\`)"
+            echo "- **Declared API:** ${{ steps.version.outputs.api_version }}"
+            if [ -n "$DETAIL" ]; then
+              echo ""
+              echo "${DETAIL# }"
+            fi
+            echo ""
+            echo "### Changelog"
+            echo '```'
+            cat latest_changes_plain.md
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload to ESOUI
+        id: real_step
+        if: steps.mode.outputs.mode == 'real'
+        uses: m00nyONE/esoui-upload@main
+        with:
+          api_key: ${{ secrets.ESOUI_API_KEY }}
+          addon_id: ''
+          version: ${{ steps.version.outputs.display_version }}
+          zip_file: ${{ env.zip_file }}
+          changelog_file: 'CHANGELOG_BBCODE.txt'
+          description_file: 'README_BBCODE.txt'
+
+      - name: Annotate real_step result
+        if: always() && steps.mode.outputs.mode == 'real'
+        run: |
+          STATUS="${{ steps.real_step.outcome }}"
+          if [ "$STATUS" == "success" ]; then
+            TITLE="ESOUI Upload Complete"
+            DETAIL=""
+          else
+            TITLE="ESOUI Upload Failed"
+            DETAIL=" Check the 'Upload to ESOUI' step's log above. An input problem shows its own annotation there; a rejection from ESOUI's server won't show a response body (the upload action's curl call discards it), so a failure with no other detail usually means the API key, addon ID, or version was rejected server-side."
+          fi
+          echo "::notice title=$TITLE::Version ${{ steps.version.outputs.display_version }} (AddOnVersion ${{ steps.version.outputs.version }}), declared API ${{ steps.version.outputs.api_version }}.$DETAIL"
+          {
+            echo "## $TITLE"
+            echo ""
+            echo "- **Version:** ${{ steps.version.outputs.display_version }} (AddOnVersion \`${{ steps.version.outputs.version }}\`)"
+            echo "- **Declared API:** ${{ steps.version.outputs.api_version }}"
+            if [ -n "$DETAIL" ]; then
+              echo ""
+              echo "${DETAIL# }"
+            fi
+            echo ""
+            echo "### Changelog"
+            echo '```'
+            cat latest_changes_plain.md
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: ./.github/actions/git-commit-signing
+        if: steps.mode.outputs.mode == 'real'
+        with:
+          ssh_signing_key: ${{ secrets.SSH_SIGNING_KEY }}
+
+      - name: Tag the release
+        if: steps.mode.outputs.mode == 'real' && success()
+        run: |
+          TAG="Version-${{ steps.version.outputs.display_version }}"
+          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+            echo "Tag $TAG already exists."
+          else
+            git config user.name "MPHONlC"
+            git config user.email "207844175+MPHONlC@users.noreply.github.com"
+            git tag -m "$TAG" "$TAG"
+            git push origin "$TAG"
+          fi

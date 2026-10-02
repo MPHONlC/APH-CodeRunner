@@ -1,0 +1,170 @@
+name: GitHub Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry Run (creates a draft GitHub release, publishes nothing)"
+        type: boolean
+        default: true
+      release_github:
+        description: "Release to GitHub"
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      dry_run:
+        description: "Dry Run (creates a draft GitHub release, publishes nothing)"
+        type: boolean
+        default: true
+      release_github:
+        description: "Release to GitHub"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    uses: ./.github/workflows/release-gate.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  release:
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      - name: Decide what this run does
+        id: mode
+        run: |
+          if [ "${{ inputs.dry_run }}" == "true" ]; then
+            echo "mode=dry" >> "$GITHUB_OUTPUT"
+            if [ "${{ inputs.release_github }}" == "true" ]; then
+              echo "::notice title=Dry Run Is On::Release to GitHub was checked, but Dry Run is on, so nothing is published."
+            fi
+          elif [ "${{ inputs.release_github }}" == "true" ]; then
+            echo "mode=real" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=none" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Nothing To Do::Dry Run is off and Release to GitHub is not checked."
+          fi
+
+      - name: Read version from manifest
+        id: version
+        run: |
+          VER=$(grep "^## AddOnVersion:" APH-CodeRunner.txt | awk '{print $3}')
+          DISPLAY_VER=$(grep "^## Version:" APH-CodeRunner.txt | awk '{print $3}')
+          API_VER=$(grep "^## APIVersion:" APH-CodeRunner.txt | awk '{print $3, $4}')
+          echo "Read version: $DISPLAY_VER (AddOnVersion $VER, API: $API_VER)"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "display_version=$DISPLAY_VER" >> "$GITHUB_OUTPUT"
+          echo "api_version=$API_VER" >> "$GITHUB_OUTPUT"
+
+      - name: Build addon zip (excludes anything in .build-ignore)
+        run: |
+          mkdir -p /tmp/build/APH-CodeRunner
+          rsync -a --exclude-from=.build-ignore ./ /tmp/build/APH-CodeRunner/
+          cd /tmp/build && zip -r APH-CodeRunner.zip APH-CodeRunner
+          echo "zip_file=/tmp/build/APH-CodeRunner.zip" >> "$GITHUB_ENV"
+
+      - name: Extract latest changelog entries
+        run: |
+          awk '/^\[b\]\[COLOR="Orange"\]Version / { if (found) exit; found=1 } found' CHANGELOG_BBCODE.txt > latest_changes_esoui.txt
+          awk '/^### Version / { if (found) exit; found=1 } found' CHANGELOG_GFM.txt > latest_changes_github.md
+          awk '/^# VERSION / { if (found) exit; found=1 } found' CHANGELOG_COMMONMARK.txt > latest_changes_bethesda.txt
+          awk '/^Version: / { if (found) exit; found=1 } found' CHANGELOG.md > latest_changes_plain.md
+          cat latest_changes_plain.md
+
+      - name: Create GitHub Release (dry run, draft)
+        id: dry_run_step
+        if: steps.mode.outputs.mode == 'dry'
+        uses: ncipollo/release-action@v1
+        with:
+          name: Version-${{ steps.version.outputs.display_version }}
+          tag: Version-${{ steps.version.outputs.display_version }}
+          artifacts: ${{ env.zip_file }}
+          artifactContentType: application/zip
+          bodyFile: latest_changes_github.md
+          allowUpdates: true
+          draft: true
+          makeLatest: false
+
+      - name: Annotate dry_run_step result
+        if: always() && steps.mode.outputs.mode == 'dry'
+        run: |
+          STATUS="${{ steps.dry_run_step.outcome }}"
+          if [ "$STATUS" == "success" ]; then
+            TITLE="GitHub Dry Run Complete"
+            DETAIL=""
+          else
+            TITLE="GitHub Dry Run Failed"
+            DETAIL=" Check the 'Create GitHub Release (dry run, draft)' step's log above. A permissions/403 error there usually means this repo's Settings > Actions > General > Workflow permissions is set to read-only. Other causes: tag already exists on a different commit, bad artifact path."
+          fi
+          echo "::notice title=$TITLE::Version ${{ steps.version.outputs.display_version }} (AddOnVersion ${{ steps.version.outputs.version }}), declared API ${{ steps.version.outputs.api_version }}.$DETAIL"
+          {
+            echo "## $TITLE"
+            echo ""
+            echo "- **Version:** ${{ steps.version.outputs.display_version }} (AddOnVersion \`${{ steps.version.outputs.version }}\`)"
+            echo "- **Declared API:** ${{ steps.version.outputs.api_version }}"
+            if [ -n "$DETAIL" ]; then
+              echo ""
+              echo "${DETAIL# }"
+            fi
+            echo ""
+            echo "### Changelog"
+            echo '```'
+            cat latest_changes_plain.md
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create GitHub Release
+        id: real_step
+        if: steps.mode.outputs.mode == 'real'
+        uses: ncipollo/release-action@v1
+        with:
+          name: Version-${{ steps.version.outputs.display_version }}
+          tag: Version-${{ steps.version.outputs.display_version }}
+          artifacts: ${{ env.zip_file }}
+          artifactContentType: application/zip
+          bodyFile: latest_changes_github.md
+          allowUpdates: true
+          draft: false
+          makeLatest: true
+
+      - name: Annotate real_step result
+        if: always() && steps.mode.outputs.mode == 'real'
+        run: |
+          STATUS="${{ steps.real_step.outcome }}"
+          if [ "$STATUS" == "success" ]; then
+            TITLE="GitHub Release Complete"
+            DETAIL=""
+          else
+            TITLE="GitHub Release Failed"
+            DETAIL=" Check the 'Create GitHub Release' step's log above. A permissions/403 error there usually means this repo's Settings > Actions > General > Workflow permissions is set to read-only. Other causes: tag already exists on a different commit, bad artifact path."
+          fi
+          echo "::notice title=$TITLE::Version ${{ steps.version.outputs.display_version }} (AddOnVersion ${{ steps.version.outputs.version }}), declared API ${{ steps.version.outputs.api_version }}.$DETAIL"
+          {
+            echo "## $TITLE"
+            echo ""
+            echo "- **Version:** ${{ steps.version.outputs.display_version }} (AddOnVersion \`${{ steps.version.outputs.version }}\`)"
+            echo "- **Declared API:** ${{ steps.version.outputs.api_version }}"
+            if [ -n "$DETAIL" ]; then
+              echo ""
+              echo "${DETAIL# }"
+            fi
+            echo ""
+            echo "### Changelog"
+            echo '```'
+            cat latest_changes_plain.md
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

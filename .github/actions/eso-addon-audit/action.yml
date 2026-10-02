@@ -1,0 +1,105 @@
+name: 'ESO Addon Audit'
+description: 'Loads an ESO add-on in keyboard, gamepad and console stub runs and runs the static checks set in its .eso-auditrc.'
+author: 'MPHONlC'
+branding:
+  icon: 'shield'
+  color: 'green'
+
+inputs:
+  addon_dir:
+    description: 'Folder holding the .addon manifest and .eso-auditrc'
+    required: false
+    default: '.'
+  library_repos:
+    description: 'One Name=owner/repo[@ref] per line for each entry in the libraries list of .eso-auditrc'
+    required: false
+    default: 'LibAPH=MPHONlC/LibAPH'
+  esoui_ref:
+    description: 'Branch or tag of esoui/esoui to load ESO globals from; empty uses the default branch'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Lua 5.1
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y lua5.1
+
+    - name: Lay out the add-on
+      id: layout
+      shell: bash
+      run: |
+        ROOT="$RUNNER_TEMP/eso-addon-audit"
+        PROJECTS="$ROOT/Projects"
+        rm -rf "$ROOT"
+        mkdir -p "$PROJECTS"
+        cd "${{ inputs.addon_dir }}"
+        MANIFEST=$(find . -maxdepth 1 -name '*.addon' | head -n 1)
+        if [ -z "$MANIFEST" ]; then
+          MANIFEST=$(grep -l '^## Title:' ./*.txt 2>/dev/null | head -n 1)
+        fi
+        if [ -z "$MANIFEST" ]; then
+          echo "::error title=ESO Addon Audit::No .addon or .txt manifest in ${{ inputs.addon_dir }}"
+          exit 1
+        fi
+        ADDON=$(basename "$MANIFEST")
+        ADDON="${ADDON%.*}"
+        mkdir -p "$PROJECTS/$ADDON"
+        tar --exclude=.git -cf - . | tar -xf - -C "$PROJECTS/$ADDON"
+        echo "root=$ROOT" >> "$GITHUB_OUTPUT"
+        echo "projects=$PROJECTS" >> "$GITHUB_OUTPUT"
+        echo "addon=$ADDON" >> "$GITHUB_OUTPUT"
+
+    - name: Fetch ESO UI source
+      shell: bash
+      run: |
+        ROOT="${{ steps.layout.outputs.root }}"
+        ARGS=(--depth 1)
+        if [ -n "${{ inputs.esoui_ref }}" ]; then
+          ARGS+=(--branch "${{ inputs.esoui_ref }}")
+        fi
+        git clone "${ARGS[@]}" https://github.com/esoui/esoui "$ROOT/esoui"
+        for NEEDED in esoui/libraries/globals/globalapi.lua ESOUIDocumentation.txt; do
+          if [ ! -f "$ROOT/esoui/$NEEDED" ]; then
+            echo "::error title=ESO Addon Audit::esoui/esoui has no $NEEDED"
+            exit 1
+          fi
+        done
+
+    - name: Fetch libraries
+      shell: bash
+      env:
+        LIBRARY_REPOS: ${{ inputs.library_repos }}
+      run: |
+        PROJECTS="${{ steps.layout.outputs.projects }}"
+        ADDON="${{ steps.layout.outputs.addon }}"
+        CONFIG="$PROJECTS/$ADDON/.eso-auditrc"
+        [ -f "$CONFIG" ] || exit 0
+        STATUS=0
+        while IFS= read -r LIBRARY; do
+          [ -n "$LIBRARY" ] || continue
+          SOURCE=$(printf '%s\n' "$LIBRARY_REPOS" | sed -n "s/^[[:space:]]*$LIBRARY=\(.*\)$/\1/p" | head -n 1 | tr -d '[:space:]')
+          if [ -z "$SOURCE" ]; then
+            echo "::error title=ESO Addon Audit::$LIBRARY is listed in .eso-auditrc but has no entry in library_repos"
+            STATUS=1
+            continue
+          fi
+          REPO="${SOURCE%@*}"
+          ARGS=(--depth 1)
+          if [ "$SOURCE" != "$REPO" ]; then
+            ARGS+=(--branch "${SOURCE##*@}")
+          fi
+          git clone "${ARGS[@]}" "https://github.com/$REPO" "$PROJECTS/$LIBRARY"
+          rm -rf "$PROJECTS/$LIBRARY/.git"
+        done < <(python3 "${{ github.action_path }}/harness/audit/run_audit.py" --libraries --config "$CONFIG")
+        exit $STATUS
+
+    - name: Audit
+      shell: bash
+      run: |
+        ROOT="${{ steps.layout.outputs.root }}"
+        python3 "${{ github.action_path }}/harness/audit/run_audit.py" "${{ steps.layout.outputs.addon }}" \
+          --root "${{ steps.layout.outputs.projects }}" \
+          --esoui "$ROOT/esoui" \
+          --docs "$ROOT/esoui/ESOUIDocumentation.txt"

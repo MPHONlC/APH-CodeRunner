@@ -1,0 +1,112 @@
+name: Markdown Checker
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'README_BBCODE.txt'
+      - 'README_COMMONMARK.txt'
+      - 'README.md'
+      - 'CHANGELOG_BBCODE.txt'
+      - 'CHANGELOG_GFM.txt'
+      - 'CHANGELOG_COMMONMARK.txt'
+  workflow_dispatch:
+    inputs:
+      apply_fix:
+        description: "Auto-generate the 3 changelog files from CHANGELOG.md's current version (only runs if validation below finds problems, or if forced)"
+        type: boolean
+        default: false
+      force_regenerate:
+        description: "Regenerate even if validation found no syntax errors (useful for a version you haven't hand-authored yet)"
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      apply_fix:
+        type: boolean
+        default: true
+      force_regenerate:
+        type: boolean
+        default: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      invalid: ${{ steps.lint.outcome == 'failure' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: ./.github/actions/git-commit-signing
+        with:
+          ssh_signing_key: ${{ secrets.SSH_SIGNING_KEY }}
+
+      - name: Validate each file's own markup
+        id: lint
+        continue-on-error: ${{ inputs.apply_fix == true }}
+        uses: ./.github/actions/markdown-check
+        with:
+          bbcode_readme: 'README_BBCODE.txt'
+          bbcode_changelog: 'CHANGELOG_BBCODE.txt'
+
+  regenerate:
+    needs: validate
+    if: always() && (inputs.apply_fix == true) && (needs.validate.outputs.invalid == 'true' || inputs.force_regenerate == true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: ./.github/actions/git-commit-signing
+        with:
+          ssh_signing_key: ${{ secrets.SSH_SIGNING_KEY }}
+
+      - name: Read current version from manifest
+        id: version
+        run: |
+          VER=$(grep "^## Version:" APH-CodeRunner.txt | head -1 | awk '{print $3}')
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Auto-generate BBCode/GitHub/Bethesda changelog entries from CHANGELOG.md
+        uses: ./.github/actions/markdown-check
+        with:
+          bbcode_readme: 'README_BBCODE.txt'
+          bbcode_changelog: 'CHANGELOG_BBCODE.txt'
+          mode: regenerate
+          version: ${{ steps.version.outputs.version }}
+          libraries: 'LibAPH,LibAddonMenu,LibHarvensAddonSettings'
+
+      - name: Commit the regenerated files, if anything changed
+        run: |
+          git config user.name "MPHONlC"
+          git config user.email "207844175+MPHONlC@users.noreply.github.com"
+          git add CHANGELOG_BBCODE.txt CHANGELOG_GFM.txt CHANGELOG_COMMONMARK.txt
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: auto-generate changelog entry v${{ steps.version.outputs.version }} from CHANGELOG.md [skip ci]"
+            git push --force-with-lease origin HEAD:main
+          fi
+
+  verify:
+    needs: [validate, regenerate]
+    if: always() && needs.validate.outputs.invalid == 'true' && inputs.apply_fix == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Check the rebuilt files
+        uses: ./.github/actions/markdown-check
+        with:
+          bbcode_readme: 'README_BBCODE.txt'
+          bbcode_changelog: 'CHANGELOG_BBCODE.txt'

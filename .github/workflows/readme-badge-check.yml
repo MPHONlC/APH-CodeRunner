@@ -1,0 +1,52 @@
+name: README Badge Check
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'README.md'
+      - 'APH-CodeRunner.txt'
+  workflow_dispatch:
+    inputs:
+      fix:
+        description: 'Auto-fix stale badge values instead of just failing'
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      fix:
+        type: boolean
+        default: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: ./.github/actions/git-commit-signing
+        with:
+          ssh_signing_key: ${{ secrets.SSH_SIGNING_KEY }}
+
+      - uses: ./.github/actions/eso-readme-badge-check
+        with:
+          manifest_file: 'APH-CodeRunner.txt'
+          fix: ${{ inputs.fix }}
+
+      - name: Commit fix, if anything changed
+        if: inputs.fix == true
+        run: |
+          git config user.name "MPHONlC"
+          git config user.email "207844175+MPHONlC@users.noreply.github.com"
+          git add README.md
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: refresh README badges to match manifest [skip ci]"
+            git push --force-with-lease origin HEAD:main
+          fi
