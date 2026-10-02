@@ -1,0 +1,7 @@
+libraries = {
+    "LibAPH",
+}
+
+globals = {
+    "APHCR",
+}

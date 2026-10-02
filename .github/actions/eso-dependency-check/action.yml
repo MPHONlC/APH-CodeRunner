@@ -1,0 +1,53 @@
+name: 'ESO Addon Dependency Version Check'
+description: "Checks your DependsOn floor against a dependency's actual published version, with optional auto-update."
+
+inputs:
+  manifest_file:
+    description: 'Your own .addon manifest'
+    required: true
+  dependency_name:
+    description: 'Name of the dependency to check, matching your DependsOn/OptionalDependsOn line'
+    required: true
+  dependency_manifest_url:
+    description: 'Raw URL to the dependency''s own live .addon manifest'
+    required: true
+  auto_update:
+    description: 'If true, automatically bump the declared floor to match the dependency''s actual version, commit, and push, instead of just failing the run'
+    required: false
+    default: 'false'
+  git_name:
+    description: 'Git name for the auto-update commit - required if auto_update is true'
+    required: false
+    default: ''
+  git_email:
+    description: 'Git email for the auto-update commit - required if auto_update is true'
+    required: false
+    default: ''
+  skip_ci:
+    description: 'Append [skip ci] to the auto-update commit message'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Fetch dependency's live manifest
+      shell: bash
+      run: |
+        curl -sSfL "${{ inputs.dependency_manifest_url }}" -o /tmp/eso-dependency-check-dep.addon
+
+    - name: Check dependency version freshness
+      shell: bash
+      run: |
+        ARGS=(
+          --manifest-file "${{ inputs.manifest_file }}"
+          --dependency-name "${{ inputs.dependency_name }}"
+          --dependency-manifest /tmp/eso-dependency-check-dep.addon
+          --git-name "${{ inputs.git_name }}"
+          --git-email "${{ inputs.git_email }}"
+          --skip-ci "${{ inputs.skip_ci }}"
+        )
+        if [ "${{ inputs.auto_update }}" == "true" ]; then
+          ARGS+=(--auto-update)
+        fi
+        python3 "${{ github.action_path }}/check_dependency_version.py" "${ARGS[@]}"

@@ -1,0 +1,23 @@
+name: Slash Command Doc Check
+
+on:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: ./.github/actions/eso-slash-command-doc-check
+        with:
+          doc_files: |
+            README_BBCODE.txt
+            README.md
+            README_COMMONMARK.txt

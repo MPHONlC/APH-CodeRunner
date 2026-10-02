@@ -1,0 +1,33 @@
+name: Version Refresh
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  refresh-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: ./.github/actions/git-commit-signing
+        with:
+          ssh_signing_key: ${{ secrets.SSH_SIGNING_KEY }}
+
+      - uses: ./.github/actions/version-refresh
+        with:
+          manifest_file: 'APH-CodeRunner.txt'
+          calver: 'true'
+          utc_offset_hours: '8'
+          changelog_md: 'CHANGELOG.md'
+          generated_changelogs: 'CHANGELOG_BBCODE.txt CHANGELOG_GFM.txt CHANGELOG_COMMONMARK.txt'
+          readme: 'README.md'
+          git_name: 'MPHONlC'
+          git_email: '207844175+MPHONlC@users.noreply.github.com'
