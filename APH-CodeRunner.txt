@@ -1,6 +1,6 @@
 ## Title: |c9CD04CAPH-CodeRunner|r
 ## Author: |ca500f3A|r|cb400e6P|r|cc300daH|r|cd200cdO|r|ce100c1NlC|r
-## APIVersion: 101050 101051
+## APIVersion: 101051 101052
 ## AddOnVersion: 26092921
 ## Version: 2026.09.29.21.48
 ## Description: |cfa9c1bAn in-game Lua code editor and runner.|r |cCCFF00Usage: /coderunner|r
