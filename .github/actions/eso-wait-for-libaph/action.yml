@@ -1,0 +1,36 @@
+name: 'ESO Wait For LibAPH'
+description: "On the daily schedule, waits while a LibAPH run is queued or running, so add-ons that follow it read its new stamp."
+
+inputs:
+  repo:
+    description: 'Repository to wait for'
+    required: false
+    default: 'MPHONlC/LibAPH'
+  workflows:
+    description: 'Workflow files in that repository to wait for, separated by spaces'
+    required: false
+    default: 'api-version-refresh.yml version-refresh.yml readme-badge-check.yml esoui-auto-release.yml github-auto-release.yml bethesda-auto-release.yml esoui-release.yml github-release.yml bethesda-release.yml'
+  timeout_minutes:
+    description: 'Longest wait before going on with what is published'
+    required: false
+    default: '120'
+  poll_seconds:
+    description: 'Seconds between checks'
+    required: false
+    default: '30'
+  token:
+    description: 'Token for the GitHub API'
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Wait for LibAPH
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        python3 "${{ github.action_path }}/wait_for_libaph.py" \
+          --repo "${{ inputs.repo }}" --workflows "${{ inputs.workflows }}" \
+          --timeout-minutes "${{ inputs.timeout_minutes }}" --poll-seconds "${{ inputs.poll_seconds }}"

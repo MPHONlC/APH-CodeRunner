@@ -1,0 +1,58 @@
+name: "\u2705 APH-CodeRunner Test Checklist (PC)"
+description: Run through APH-CodeRunner's PC test checklist and report results
+title: '[TEST][PC] '
+labels:
+- testing
+assignees:
+- MPHONlC
+body:
+- type: markdown
+  attributes:
+    value: Thanks for testing **APH-CodeRunner** on PC! Check off everything you actually tested and confirmed working. Anything broken or partly working, describe it in the notes field at the end instead of checking it off.
+- type: input
+  id: version
+  attributes:
+    label: Add-on version
+    placeholder: e.g. 2026.09.29.21.48
+  validations:
+    required: true
+- type: dropdown
+  id: platform
+  attributes:
+    label: Platform
+    options:
+    - PC (NA)
+    - PC (EU)
+    - PC (PTS)
+  validations:
+    required: true
+- type: checkboxes
+  id: pc_tests
+  attributes:
+    label: PC tests confirmed working
+    options:
+    - label: 'Open and close: Type /coderunner twice.'
+    - label: 'Files: Press Add twice, type into each box, move one with Up and Down, untick one, then Remove one.'
+    - label: 'Run All: Paste a small add-on (a print on ADD_ON_LOADED and on PLAYER_ACTIVATED) and press Run All.'
+    - label: 'Unticked file: Untick a box that would error, then Run All.'
+    - label: 'Long file: Paste a file longer than one box into two boxes with the same name, then Run All.'
+    - label: 'Saved tables: Fill in the add-on name and a SavedVariables name, run code that writes to it, then /reloadui.'
+    - label: 'Stop: Run code that registers an event and a slash command, then press Stop.'
+    - label: 'Terminate All: Start two runs, then press Terminate All.'
+    - label: 'Errors: Run a box with a syntax error, then one with a runtime error.'
+    - label: 'Clear errors: In the Errors window press Clear.'
+    - label: 'SavedVariables viewer: Open the viewer and search for a key.'
+    - label: 'Undo and Redo: Type, press Undo, then Redo, in two different files.'
+    - label: 'Suggestions: Type the start of a game function name, then press Tab; type a name followed by a dot.'
+    - label: 'Font: Pick another font in the font dropdown.'
+    - label: 'Search: Search for a word that appears in two files.'
+    - label: 'Show in menus: Turn on Show in menus, open the inventory, then turn it off.'
+    - label: 'Chat Logs: Untick Chat Logs in the editor''s header, then Run All a box with an error. Tick it again and run it once more.'
+    - label: 'Line numbers: Type past the bottom of a box and scroll.'
+    - label: 'Missing LibAPH: Disable LibAPH and reload.'
+- type: textarea
+  id: notes
+  attributes:
+    label: Anything broken, partly working, or not tested
+    description: 'One line per issue: which test, what happened instead of Expected.'
+    placeholder: 'e.g. PC-L-04 Bug report: popup opened but API version line was blank'
