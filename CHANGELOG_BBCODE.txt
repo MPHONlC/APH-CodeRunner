@@ -1,0 +1,7 @@
+[SIZE="3"][b][COLOR="#4CAF50"]Changelog[/COLOR][/b][/SIZE]
+
+[b][COLOR="Orange"]Version 2026.10.06.13.49[/COLOR]: [COLOR="Gray"][i](10/06/2026)[/i][/COLOR][/b]
+
+[LIST]
+[*] Initial public release.
+[/LIST]

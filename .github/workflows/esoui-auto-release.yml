@@ -1,0 +1,109 @@
+name: ESOUI Auto Release
+
+on:
+  repository_dispatch:
+    types: [libaph-esoui-auto-release]
+  schedule:
+    - cron: '20 13 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry Run (tests the ESOUI upload against ESOUI's test endpoint, publishes nothing)"
+        type: boolean
+        default: true
+      upload_esoui:
+        description: "Upload to ESOUI"
+        type: boolean
+        default: false
+      force:
+        description: "Release even if the ESO API version has not changed since the last release"
+        type: boolean
+        default: false
+
+env:
+  AUTO_RELEASE_ENABLED: 'false'
+  AUTO_RELEASE_DRY_RUN: 'true'
+
+permissions:
+  contents: read
+
+jobs:
+  switch:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      dry: ${{ steps.decide.outputs.dry }}
+      upload: ${{ steps.decide.outputs.upload }}
+    steps:
+      - id: decide
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "dry=${{ inputs.dry_run }}" >> "$GITHUB_OUTPUT"
+            echo "upload=${{ inputs.upload_esoui }}" >> "$GITHUB_OUTPUT"
+          elif [ "$AUTO_RELEASE_ENABLED" == "true" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "dry=$AUTO_RELEASE_DRY_RUN" >> "$GITHUB_OUTPUT"
+            echo "upload=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "dry=true" >> "$GITHUB_OUTPUT"
+            echo "upload=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Auto Release Is Off::AUTO_RELEASE_ENABLED is 'false' at the top of this workflow, so the schedule does nothing."
+          fi
+
+  api-check:
+    needs: switch
+    if: needs.switch.outputs.run == 'true'
+    uses: ./.github/workflows/api-version-refresh.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  detect:
+    needs: [switch, api-check]
+    if: needs.switch.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.compare.outputs.release }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - id: compare
+        run: |
+          if [ "${{ inputs.force }}" == "true" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Forced by hand."
+            exit 0
+          fi
+          LAST=$(git tag --list 'Version-*' --sort=-creatordate | head -1)
+          if [ -z "$LAST" ]; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=No Release Yet::No Version-* tag exists, so there is no earlier API to compare against. Release once by hand first."
+            exit 0
+          fi
+          OLD=$(git show "$LAST:APH-CodeRunner.txt" | grep '^## APIVersion:' | head -1)
+          NEW=$(grep '^## APIVersion:' APH-CodeRunner.txt | head -1)
+          echo "Last release ($LAST): $OLD"
+          echo "Now:                  $NEW"
+          if [ "$OLD" != "$NEW" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=API Unchanged::The declared API matches the last release, so nothing to publish."
+          fi
+
+  release:
+    needs: [switch, detect]
+    if: needs.switch.outputs.run == 'true' && needs.detect.outputs.release == 'true'
+    uses: ./.github/workflows/esoui-release.yml
+    secrets: inherit
+    permissions:
+      contents: write
+    with:
+      dry_run: ${{ needs.switch.outputs.dry == 'true' }}
+      upload_esoui: ${{ needs.switch.outputs.upload == 'true' }}

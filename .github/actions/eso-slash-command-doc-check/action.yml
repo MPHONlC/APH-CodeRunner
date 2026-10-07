@@ -1,0 +1,26 @@
+name: 'ESO Addon Slash Command Doc Check'
+description: 'Scans ESO addon Lua source for registered slash commands and checks each is documented in your doc files.'
+
+inputs:
+  source_glob:
+    description: 'Glob (recursive) matching your Lua source files'
+    required: false
+    default: '**/*.lua'
+  doc_files:
+    description: 'List of doc files to check, one per line (or comma-separated)'
+    required: true
+  ignore_commands:
+    description: 'Slash commands that are deliberately undocumented (author-only or debug commands), one per line or comma-separated'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check slash command documentation
+      shell: bash
+      run: |
+        python3 "${{ github.action_path }}/check_slash_commands.py" \
+          --source-glob "${{ inputs.source_glob }}" \
+          --doc-files "${{ inputs.doc_files }}" \
+          --ignore-commands "${{ inputs.ignore_commands }}"

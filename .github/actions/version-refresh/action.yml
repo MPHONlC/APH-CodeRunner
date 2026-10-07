@@ -1,0 +1,160 @@
+name: 'Version Refresh'
+description: "Refreshes the date portion of an addon manifest's version field to today."
+
+inputs:
+  manifest_file:
+    description: 'Path to the manifest file (.addon, .toc, or any similar text manifest)'
+    required: true
+  field_name:
+    description: 'The manifest field to refresh, matched as "## <field_name>: <value>"'
+    required: false
+    default: 'AddOnVersion'
+  format:
+    description: 'Template for the field value: Y/M/D for date digits, V for version digits, "NONE" for no date, "TIMESTAMP" for a Unix timestamp field'
+    required: false
+    default: 'YYMMDDVVV'
+  git_name:
+    description: 'Git name to use for the refresh commit'
+    required: true
+  git_email:
+    description: 'Git email to use for the refresh commit'
+    required: true
+  skip_ci:
+    description: 'Append [skip ci] to the commit message'
+    required: false
+    default: 'true'
+  calver:
+    description: "'true' stamps Version as YYYY.MM.DD.HH.mm and AddOnVersion as YYMMDDHH together (ignores field_name and format)"
+    required: false
+    default: 'false'
+  utc_offset_hours:
+    description: 'Hours added to UTC for the calver stamp'
+    required: false
+    default: '8'
+  changelog_md:
+    description: 'CHANGELOG.md whose top entry header is restamped in calver mode (blank to skip)'
+    required: false
+    default: ''
+  generated_changelogs:
+    description: 'Space-separated generated changelog files whose top entry header is restamped in calver mode'
+    required: false
+    default: ''
+  readme:
+    description: 'README whose version badge is restamped in calver mode (blank to skip)'
+    required: false
+    default: ''
+  sync:
+    description: 'Newline-separated "path::regex" lines; the regex needs 3 groups (prefix)(old version)(suffix) and group 2 is replaced in calver mode'
+    required: false
+    default: ''
+  follow_repo:
+    description: "owner/repo whose manifest gives the calver stamp instead of the clock (e.g. MPHONlC/LibAPH), so every project released in one batch shares one Version and AddOnVersion; the run fails if that stamp is not newer than this repo's last Version-* release"
+    required: false
+    default: ''
+  follow_manifest:
+    description: 'Manifest path inside follow_repo (e.g. LibAPH.addon)'
+    required: false
+    default: ''
+  follow_ref:
+    description: 'Branch of follow_repo to read'
+    required: false
+    default: 'main'
+
+outputs:
+  changed:
+    description: "'true' if the manifest was updated, 'false' otherwise"
+    value: ${{ steps.refresh.outputs.changed }}
+  old_version:
+    description: 'The field value before this run'
+    value: ${{ steps.refresh.outputs.old }}
+  new_version:
+    description: 'The field value after this run'
+    value: ${{ steps.refresh.outputs.new }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Refresh the manifest's date-based version field
+      id: refresh
+      shell: bash
+      env:
+        SYNC_LINES: ${{ inputs.sync }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        push_with_retry() {
+          BRANCH="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
+          for ATTEMPT in 1 2 3 4; do
+            if git pull --rebase --autostash origin "$BRANCH" && git push origin "HEAD:$BRANCH"; then
+              return 0
+            fi
+            sleep $((ATTEMPT * 5))
+          done
+          echo "::warning title=Push skipped::Could not push after 4 attempts (another run was pushing at the same time); the next run recomputes the same values."
+          return 0
+        }
+        if [ "${{ inputs.calver }}" == "true" ]; then
+          ARGS=(--manifest-file "${{ inputs.manifest_file }}" --utc-offset "${{ inputs.utc_offset_hours }}")
+          [ -n "${{ inputs.changelog_md }}" ] && ARGS+=(--changelog-md "${{ inputs.changelog_md }}")
+          [ -n "${{ inputs.readme }}" ] && ARGS+=(--readme "${{ inputs.readme }}")
+          for f in ${{ inputs.generated_changelogs }}; do ARGS+=(--generated-changelog "$f"); done
+          if [ -n "${{ inputs.follow_repo }}" ]; then
+            ARGS+=(--follow-repo "${{ inputs.follow_repo }}" --follow-manifest "${{ inputs.follow_manifest }}" --follow-ref "${{ inputs.follow_ref }}")
+          fi
+          while IFS= read -r line; do
+            [ -n "$line" ] && ARGS+=(--sync "$line")
+          done <<< "$SYNC_LINES"
+          OUTPUT=$(python3 "${{ github.action_path }}/calver_refresh.py" "${ARGS[@]}")
+        else
+          OUTPUT=$(python3 "${{ github.action_path }}/refresh_version.py" \
+            --manifest-file "${{ inputs.manifest_file }}" \
+            --field-name "${{ inputs.field_name }}" \
+            --format "${{ inputs.format }}")
+        fi
+        echo "$OUTPUT"
+        CHANGED=$(echo "$OUTPUT" | grep '^changed=' | cut -d= -f2)
+
+        BADGES="${{ github.action_path }}/../eso-readme-badge-check/check_readme_badges.py"
+        if [ -n "${{ inputs.readme }}" ] && [ -f "$BADGES" ] && [ -f "${{ inputs.readme }}" ]; then
+          python3 "$BADGES" --readme-file "${{ inputs.readme }}" --manifest-file "${{ inputs.manifest_file }}" --fix > /dev/null || true
+          if ! git diff --quiet -- "${{ inputs.readme }}"; then CHANGED=true; fi
+        fi
+
+        if [ "$CHANGED" == "true" ]; then
+          git config user.name "${{ inputs.git_name }}"
+          git config user.email "${{ inputs.git_email }}"
+          if [ "${{ inputs.calver }}" == "true" ]; then
+            git add -u
+            MSG="chore: refresh Version and AddOnVersion stamp"
+          else
+            git add "${{ inputs.manifest_file }}"
+            MSG="chore: refresh ${{ inputs.field_name }} date"
+          fi
+          if [ "${{ inputs.skip_ci }}" == "true" ]; then
+            MSG="$MSG [skip ci]"
+          fi
+          git commit -m "$MSG"
+          push_with_retry
+        fi
+
+    - name: Annotate result
+      if: always()
+      shell: bash
+      run: |
+        STATUS="${{ steps.refresh.outcome }}"
+        if [ "$STATUS" != "success" ]; then
+          TITLE="Version Refresh Failed"
+          echo "::error title=$TITLE::Check the 'Refresh the manifest's date-based version field' step's log above."
+        elif [ "${{ steps.refresh.outputs.changed }}" == "true" ]; then
+          TITLE="Version Refresh Complete"
+          echo "::notice title=$TITLE::${{ inputs.field_name }} updated from ${{ steps.refresh.outputs.old }} to ${{ steps.refresh.outputs.new }} and pushed."
+        else
+          TITLE="Version Already Up To Date"
+          echo "::notice title=$TITLE::${{ inputs.field_name }} is already ${{ steps.refresh.outputs.old }} - nothing to change."
+        fi
+        {
+          echo "## $TITLE"
+          echo ""
+          echo "- **Field:** ${{ inputs.field_name }}"
+          echo "- **Previous value:** ${{ steps.refresh.outputs.old }}"
+          echo "- **Current value:** ${{ steps.refresh.outputs.new }}"
+        } >> "$GITHUB_STEP_SUMMARY"
