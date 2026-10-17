@@ -4,7 +4,7 @@
 ## AddOnVersion: 26101801
 ## Version: 2026.10.18.01.41
 ## Description: |cfa9c1bAn in-game Lua code editor and runner.|r |cCCFF00Usage: /coderunner|r
-## DependsOn: LibAPH>=26100717
+## DependsOn: LibAPH>=26101801
 ## SavedVariables: APHCodeRunner_SV
 
 CORE/APH-CodeRunner.lua
