@@ -1,0 +1,129 @@
+name: "MPHONlC's ESO Changelog Note"
+description: 'Adds a one-line note such as "API Bump" to CHANGELOG.md and rebuilds the BBCode, GitHub and Bethesda changelogs.'
+
+inputs:
+  bullet:
+    description: 'The note, e.g. API Bump or Database Update'
+    required: true
+  category:
+    description: 'Category line the note goes under, e.g. Compatibility'
+    required: true
+  when:
+    description: "'api' adds it only when the manifest APIVersion differs from the latest Version-* tag, 'data' only when data_path differs from it, 'always' every time"
+    required: false
+    default: 'always'
+  manifest_file:
+    description: 'Add-on manifest (needed for when: api)'
+    required: false
+    default: ''
+  data_path:
+    description: 'Folder compared for when: data'
+    required: false
+    default: 'DATA'
+  changelog_md:
+    description: 'Source changelog'
+    required: false
+    default: 'CHANGELOG.md'
+  bbcode_changelog:
+    description: 'ESOUI changelog, every entry'
+    required: false
+    default: 'CHANGELOG_BBCODE.txt'
+  github_changelog:
+    description: 'GitHub changelog, newest entry only'
+    required: false
+    default: 'CHANGELOG_GFM.txt'
+  bethesda_changelog:
+    description: 'Bethesda changelog, newest entry only'
+    required: false
+    default: 'CHANGELOG_COMMONMARK.txt'
+  libraries:
+    description: 'Comma-separated library names highlighted in the BBCode changelog'
+    required: false
+    default: 'LibAPH,LibAddonMenu,LibHarvensAddonSettings'
+  terms_file:
+    description: 'Highlight terms file used by markdown-check'
+    required: false
+    default: '.github/changelog-highlight-terms.txt'
+  utc_offset_hours:
+    description: 'Hours added to UTC for the stamp of a new entry (version-refresh restamps it)'
+    required: false
+    default: '8'
+  commit:
+    description: "'true' commits and pushes the four changelog files"
+    required: false
+    default: 'true'
+  git_name:
+    description: 'Git name for the commit'
+    required: false
+    default: 'MPHONlC'
+  git_email:
+    description: 'Git email for the commit'
+    required: false
+    default: '207844175+MPHONlC@users.noreply.github.com'
+
+outputs:
+  changed:
+    description: "'true' if the note was added"
+    value: ${{ steps.note.outputs.changed }}
+  version:
+    description: 'Version of the entry that holds the note'
+    value: ${{ steps.note.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Add the note
+      id: note
+      shell: bash
+      env:
+        NOTE_BULLET: ${{ inputs.bullet }}
+        NOTE_CATEGORY: ${{ inputs.category }}
+        NOTE_WHEN: ${{ inputs.when }}
+        NOTE_MANIFEST: ${{ inputs.manifest_file }}
+        NOTE_DATA: ${{ inputs.data_path }}
+        NOTE_MD: ${{ inputs.changelog_md }}
+        NOTE_BBCODE: ${{ inputs.bbcode_changelog }}
+        NOTE_GFM: ${{ inputs.github_changelog }}
+        NOTE_COMMONMARK: ${{ inputs.bethesda_changelog }}
+        NOTE_LIBRARIES: ${{ inputs.libraries }}
+        NOTE_TERMS: ${{ inputs.terms_file }}
+        NOTE_OFFSET: ${{ inputs.utc_offset_hours }}
+      run: |
+        python3 "${{ github.action_path }}/changelog_note.py" \
+          --bullet "$NOTE_BULLET" \
+          --category "$NOTE_CATEGORY" \
+          --when "$NOTE_WHEN" \
+          --manifest-file "$NOTE_MANIFEST" \
+          --data-path "$NOTE_DATA" \
+          --changelog-md "$NOTE_MD" \
+          --bbcode "$NOTE_BBCODE" \
+          --gfm "$NOTE_GFM" \
+          --commonmark "$NOTE_COMMONMARK" \
+          --generator-dir "${{ github.action_path }}/../markdown-check" \
+          --libraries "$NOTE_LIBRARIES" \
+          --terms-file "$NOTE_TERMS" \
+          --utc-offset "$NOTE_OFFSET"
+
+    - name: Commit and push the note
+      if: inputs.commit == 'true' && steps.note.outputs.changed == 'true'
+      shell: bash
+      env:
+        NOTE_BULLET: ${{ inputs.bullet }}
+        NOTE_VERSION: ${{ steps.note.outputs.version }}
+        NOTE_FILES: ${{ inputs.changelog_md }} ${{ inputs.bbcode_changelog }} ${{ inputs.github_changelog }} ${{ inputs.bethesda_changelog }}
+        NOTE_NAME: ${{ inputs.git_name }}
+        NOTE_EMAIL: ${{ inputs.git_email }}
+      run: |
+        git config user.name "$NOTE_NAME"
+        git config user.email "$NOTE_EMAIL"
+        git add $NOTE_FILES
+        git commit -m "chore: changelog note \"$NOTE_BULLET\" for $NOTE_VERSION [skip ci]"
+        BRANCH="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD)}"
+        for ATTEMPT in 1 2 3 4; do
+          if git pull --rebase --autostash origin "$BRANCH" && git push origin "HEAD:$BRANCH"; then
+            exit 0
+          fi
+          sleep $((ATTEMPT * 5))
+        done
+        echo "::error title=Changelog note not pushed::Could not push \"$NOTE_BULLET\" after 4 attempts, so the release stops here instead of going out with the previous changelog."
+        exit 1

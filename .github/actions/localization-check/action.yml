@@ -1,0 +1,23 @@
+name: 'Localization Check'
+description: 'Compares every lang/*.lua translation file against a reference file, catching a missing key or dropped format placeholder.'
+
+inputs:
+  lang_glob:
+    description: 'Glob matching your language files'
+    required: false
+    default: 'lang/*.lua'
+  reference:
+    description: 'Basename of the source-of-truth language file (e.g. default.lua)'
+    required: false
+    default: 'default.lua'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check localization completeness
+      shell: bash
+      run: |
+        python3 "${{ github.action_path }}/check_localization.py" \
+          --lang-glob "${{ inputs.lang_glob }}" \
+          --reference "${{ inputs.reference }}" \
+          | tee -a "$GITHUB_STEP_SUMMARY"

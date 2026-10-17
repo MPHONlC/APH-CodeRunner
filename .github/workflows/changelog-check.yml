@@ -1,0 +1,29 @@
+name: Changelog Check
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'CHANGELOG.md'
+      - 'CHANGELOG_BBCODE.txt'
+      - 'CHANGELOG_GFM.txt'
+      - 'CHANGELOG_COMMONMARK.txt'
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref_name }}
+
+      - uses: ./.github/actions/changelog-check
+        with:
+          bbcode_file: 'CHANGELOG_BBCODE.txt'
+          manifest_file: 'APH-CodeRunner.txt'

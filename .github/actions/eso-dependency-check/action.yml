@@ -1,0 +1,79 @@
+name: 'ESO Addon Dependency Version Check'
+description: "Checks your DependsOn floor against a dependency's actual published version, with optional auto-update."
+author: 'MPHONlC'
+branding:
+  icon: 'link'
+  color: 'blue'
+
+inputs:
+  manifest_file:
+    description: 'Your own .addon manifest'
+    required: true
+  dependency_name:
+    description: 'Name of the dependency to check, matching your DependsOn/OptionalDependsOn line'
+    required: true
+  dependency_manifest_url:
+    description: 'Raw URL to the dependency''s own live .addon manifest (used when dependency_release_repo has no release)'
+    required: true
+  dependency_release_repo:
+    description: 'owner/repo of the dependency; when set, its manifest is read from the latest GitHub release tag, so only a released version counts'
+    required: false
+    default: ''
+  auto_update:
+    description: 'If true, automatically bump the declared floor to match the dependency''s actual version, commit, and push, instead of just failing the run'
+    required: false
+    default: 'false'
+  git_name:
+    description: 'Git name for the auto-update commit - required if auto_update is true'
+    required: false
+    default: ''
+  git_email:
+    description: 'Git email for the auto-update commit - required if auto_update is true'
+    required: false
+    default: ''
+  release_gate:
+    description: 'If true, only fail when the declared floor is above the published version (used right before a release)'
+    required: false
+    default: 'false'
+  skip_ci:
+    description: 'Append [skip ci] to the auto-update commit message'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Fetch dependency's live manifest
+      shell: bash
+      run: |
+        URL="${{ inputs.dependency_manifest_url }}"
+        if [ -n "${{ inputs.dependency_release_repo }}" ]; then
+          TAG=$(curl -sSfL "https://api.github.com/repos/${{ inputs.dependency_release_repo }}/releases/latest" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name",""))' || true)
+          if [ -n "$TAG" ]; then
+            FILE=$(basename "$URL")
+            URL="https://raw.githubusercontent.com/${{ inputs.dependency_release_repo }}/$TAG/$FILE"
+            echo "Reading the dependency from its latest release, $TAG"
+          else
+            echo "::warning::${{ inputs.dependency_release_repo }} has no GitHub release yet; reading $URL"
+          fi
+        fi
+        curl -sSfL "$URL" -o /tmp/eso-dependency-check-dep.addon
+
+    - name: Check dependency version freshness
+      shell: bash
+      run: |
+        ARGS=(
+          --manifest-file "${{ inputs.manifest_file }}"
+          --dependency-name "${{ inputs.dependency_name }}"
+          --dependency-manifest /tmp/eso-dependency-check-dep.addon
+          --git-name "${{ inputs.git_name }}"
+          --git-email "${{ inputs.git_email }}"
+          --skip-ci "${{ inputs.skip_ci }}"
+        )
+        if [ "${{ inputs.auto_update }}" == "true" ]; then
+          ARGS+=(--auto-update)
+        fi
+        if [ "${{ inputs.release_gate }}" == "true" ]; then
+          ARGS+=(--release-gate)
+        fi
+        python3 "${{ github.action_path }}/check_dependency_version.py" "${ARGS[@]}"
