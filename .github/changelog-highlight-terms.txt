@@ -1,0 +1,10 @@
+Module Manager
+Setup Wizard
+Library Warning Messages
+chat and screen announcement messages
+submenus remembering
+console Settings Menu
+Live statistics
+
+Bug Report:Lime
+Client information:Lime

@@ -1,0 +1,67 @@
+name: 'Changelog Check'
+description: 'Compares changelog version, date, and content across BBCode, GitHub, and Bethesda; fails on disagreement.'
+
+inputs:
+  plain_file:
+    description: 'Path to the plain-setext root changelog ("Version: X.X.X (YYYY-MM-DD)" style)'
+    required: false
+    default: 'CHANGELOG.md'
+  bbcode_file:
+    description: 'Path to the BBCode-forum changelog file - leave blank to auto-detect CHANGELOG_BBCODE.txt or CHANGELOG_ESOUI.txt'
+    required: false
+    default: ''
+  bbcode_version_marker:
+    description: 'Regex matching the start of one version entry in the BBCode file'
+    required: false
+    default: '^\[b\]\[COLOR="Orange"\]Version '
+  github_file:
+    description: 'Path to the GitHub Flavored Markdown changelog file - leave blank to auto-detect CHANGELOG_GFM.txt or CHANGELOG_GITHUB.txt (any case)'
+    required: false
+    default: ''
+  github_version_marker:
+    description: 'Regex matching the start of one version entry in the GitHub file'
+    required: false
+    default: '^### Version '
+  bethesda_file:
+    description: 'Path to the Bethesda (CommonMark) changelog file - leave blank to auto-detect CHANGELOG_COMMONMARK/PLAINMARKDOWN/BETHESDA.txt (any case)'
+    required: false
+    default: ''
+  bethesda_version_marker:
+    description: 'Regex matching the start of one version entry in the Bethesda file'
+    required: false
+    default: '^# VERSION '
+  manifest_file:
+    description: 'Optional .addon manifest to also cross-check the version and report the API version - leave blank to skip'
+    required: false
+    default: ''
+  bethesda_optional:
+    description: 'If true, a missing Bethesda file is treated as "not published there yet" instead of an error'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Compare changelog date, version, and content across platforms
+      shell: bash
+      env:
+        BBCODE_VERSION_MARKER: ${{ inputs.bbcode_version_marker }}
+        GITHUB_VERSION_MARKER: ${{ inputs.github_version_marker }}
+        BETHESDA_VERSION_MARKER: ${{ inputs.bethesda_version_marker }}
+      run: |
+        ARGS=(
+          --plain-file "${{ inputs.plain_file }}"
+          --bbcode-file "${{ inputs.bbcode_file }}"
+          --bbcode-version-marker "$BBCODE_VERSION_MARKER"
+          --github-file "${{ inputs.github_file }}"
+          --github-version-marker "$GITHUB_VERSION_MARKER"
+          --bethesda-file "${{ inputs.bethesda_file }}"
+          --bethesda-version-marker "$BETHESDA_VERSION_MARKER"
+        )
+        if [ -n "${{ inputs.manifest_file }}" ]; then
+          ARGS+=(--manifest-file "${{ inputs.manifest_file }}")
+        fi
+        if [ "${{ inputs.bethesda_optional }}" == "true" ]; then
+          ARGS+=(--bethesda-optional)
+        fi
+        python3 "${{ github.action_path }}/compare_changelogs.py" "${ARGS[@]}"

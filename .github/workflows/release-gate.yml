@@ -1,0 +1,116 @@
+name: Release Gate
+
+on:
+  workflow_call:
+    inputs:
+      auto_release:
+        description: "Auto releases only: adds the changelog notes (API Bump, Database Update) before the version stamp"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  lua-check:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/lua-check.yml
+
+  api-version-refresh:
+    needs: lua-check
+    uses: ./.github/workflows/api-version-refresh.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  auto-release-notes:
+    needs: api-version-refresh
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - uses: ./.github/actions/git-commit-signing
+        with:
+          ssh_signing_key: ${{ secrets.SSH_SIGNING_KEY }}
+
+      - name: Add API Bump to the changelog when the API changed since the last release
+        if: inputs.auto_release
+        uses: ./.github/actions/eso-changelog-note
+        with:
+          bullet: 'API Bump'
+          category: 'Compatibility'
+          when: 'api'
+          manifest_file: 'APH-CodeRunner.txt'
+          libraries: 'LibAPH,LibAddonMenu,LibHarvensAddonSettings'
+
+  version-refresh:
+    needs: auto-release-notes
+    uses: ./.github/workflows/version-refresh.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  readme-badge-check:
+    needs: version-refresh
+    uses: ./.github/workflows/readme-badge-check.yml
+    with:
+      fix: true
+    secrets: inherit
+    permissions:
+      contents: write
+
+  dependency-check:
+    needs: readme-badge-check
+    uses: ./.github/workflows/dependency-check.yml
+    secrets: inherit
+    permissions:
+      contents: write
+
+  localization-check:
+    permissions:
+      contents: read
+    needs: dependency-check
+    uses: ./.github/workflows/localization-check.yml
+
+  broken-link-check:
+    needs: localization-check
+    uses: ./.github/workflows/broken-link-check.yml
+    with:
+      fix: true
+    secrets: inherit
+    permissions:
+      contents: write
+
+  slash-command-doc-check:
+    permissions:
+      contents: read
+    needs: broken-link-check
+    uses: ./.github/workflows/slash-command-doc-check.yml
+
+  description-check:
+    permissions:
+      contents: read
+    needs: slash-command-doc-check
+    uses: ./.github/workflows/description-check.yml
+
+  markdown-check:
+    needs: description-check
+    uses: ./.github/workflows/markdown-check.yml
+    with:
+      apply_fix: true
+    secrets: inherit
+    permissions:
+      contents: write
+
+  changelog-check:
+    permissions:
+      contents: read
+    needs: markdown-check
+    uses: ./.github/workflows/changelog-check.yml
